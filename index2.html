@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validador de RUC y Cédula Ecuatoriano</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        input, button {
+            display: block;
+            width: 100%;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #resultado {
+            margin-top: 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .info {
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Validador de RUC y Cédula Ecuatoriano</h1>
+        <input type="text" id="numero" placeholder="Ingrese RUC o cédula">
+        <button onclick="validar()">Validar</button>
+        <div id="resultado"></div>
+        <div class="info">
+            Nota: Este validador soporta RUC de personas naturales, jurídicas, instituciones públicas y cédulas.
+        </div>
+    </div>
+
+    <script>
+        function validar() {
+            const numero = document.getElementById('numero').value;
+            const resultado = document.getElementById('resultado');
+            
+            if (numero.length === 10) {
+                const validacionCedula = validarCedula(numero);
+                resultado.textContent = validacionCedula.mensaje;
+                resultado.style.color = validacionCedula.esValido ? "green" : "red";
+            } else if (numero.length === 13) {
+                const validacionRUC = validarRUC(numero);
+                resultado.textContent = validacionRUC.mensaje;
+                resultado.style.color = validacionRUC.esValido ? "green" : "red";
+            } else {
+                resultado.textContent = "Número inválido: debe tener 10 (cédula) o 13 (RUC) dígitos";
+                resultado.style.color = "red";
+            }
+        }
+
+        function validarCedula(cedula) {
+            if (!/^\d{10}$/.test(cedula)) {
+                return { esValido: false, mensaje: "Cédula inválida: debe contener solo 10 dígitos numéricos" };
+            }
+
+            const provincia = parseInt(cedula.substring(0, 2));
+            if (provincia < 1 || (provincia > 24 && provincia !== 30)) {
+                return { esValido: false, mensaje: "Cédula inválida: código de provincia incorrecto" };
+            }
+
+            const tercerDigito = parseInt(cedula.charAt(2));
+            if (tercerDigito > 6) {
+                return { esValido: false, mensaje: "Cédula inválida: tercer dígito incorrecto" };
+            }
+
+            return validarDigitoVerificadorModulo10(cedula) ?
+                { esValido: true, mensaje: "Cédula válida" } :
+                { esValido: false, mensaje: "Cédula inválida: dígito verificador incorrecto" };
+        }
+
+        function validarRUC(ruc) {
+            if (!/^\d{13}$/.test(ruc)) {
+                return { esValido: false, mensaje: "RUC inválido: debe contener solo 13 dígitos numéricos" };
+            }
+
+            const provincia = parseInt(ruc.substring(0, 2));
+            if (provincia < 1 || (provincia > 24 && provincia !== 30)) {
+                return { esValido: false, mensaje: "RUC inválido: código de provincia incorrecto" };
+            }
+
+            const tercerDigito = parseInt(ruc.charAt(2));
+
+            if (tercerDigito < 6) {
+                // Persona natural
+                if (!validarDigitoVerificadorModulo10(ruc.substring(0, 10))) {
+                    return { esValido: false, mensaje: "RUC inválido: dígito verificador incorrecto para persona natural" };
+                }
+                if (ruc.substring(10, 13) !== '001') {
+                    return { esValido: false, mensaje: "RUC inválido: los últimos dígitos deben ser 001 para persona natural" };
+                }
+                return { esValido: true, mensaje: "RUC válido: Persona natural" };
+            } else if (tercerDigito === 6) {
+                // Institución pública
+                if (!validarDigitoVerificadorModulo11(ruc.substring(0, 9), [3, 2, 7, 6, 5, 4, 3, 2])) {
+                    return { esValido: false, mensaje: "RUC inválido: dígito verificador incorrecto para institución pública" };
+                }
+                if (ruc.substring(9, 13) === '0001') {
+                    return { esValido: true, mensaje: "RUC válido: Institución pública" };
+                } else {
+                    return { esValido: false, mensaje: "RUC inválido: los últimos dígitos deben ser 0001 para institución pública" };
+                }
+            } else if (tercerDigito === 9) {
+                // Persona jurídica o extranjero sin cédula
+                return validarRUCPersonaJuridica(ruc);
+            } else {
+                return { esValido: false, mensaje: "RUC inválido: tercer dígito incorrecto" };
+            }
+        }
+
+        function validarRUCPersonaJuridica(ruc) {
+            const coeficientes = [4, 3, 2, 7, 6, 5, 4, 3, 2];
+            let suma = 0;
+            for (let i = 0; i < coeficientes.length; i++) {
+                suma += parseInt(ruc.charAt(i)) * coeficientes[i];
+            }
+            const digitoVerificador = 11 - (suma % 11);
+            const digitoCalculado = (digitoVerificador === 11) ? 0 : (digitoVerificador === 10 ? 1 : digitoVerificador);
+
+            if (digitoCalculado !== parseInt(ruc.charAt(9))) {
+                return { esValido: false, mensaje: "RUC inválido: dígito verificador incorrecto para persona jurídica" };
+            }
+
+            if (ruc.substring(10, 13) !== '001') {
+                return { esValido: false, mensaje: "RUC inválido: los últimos dígitos deben ser 001 para persona jurídica" };
+            }
+
+            return { esValido: true, mensaje: "RUC válido: Persona jurídica o extranjero sin cédula" };
+        }
+
+        function validarDigitoVerificadorModulo10(numero) {
+            const coeficientes = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+            let total = 0;
+
+            for (let i = 0; i < coeficientes.length; i++) {
+                let valor = parseInt(numero.charAt(i)) * coeficientes[i];
+                total += valor > 9 ? valor - 9 : valor;
+            }
+
+            const digitoVerificador = total % 10 ? 10 - (total % 10) : 0;
+            return digitoVerificador === parseInt(numero.charAt(9));
+        }
+
+        function validarDigitoVerificadorModulo11(numero, coeficientes) {
+            let total = 0;
+
+            for (let i = 0; i < coeficientes.length; i++) {
+                total += parseInt(numero.charAt(i)) * coeficientes[i];
+            }
+
+            const residuo = total % 11;
+            const digitoVerificador = residuo === 0 ? 0 : 11 - residuo;
+            return digitoVerificador === parseInt(numero.charAt(coeficientes.length));
+        }
+    </script>
+</body>
+</html>

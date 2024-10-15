@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validador Avanzado de Cédula y RUC Ecuatoriano</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        input, button {
+            display: block;
+            width: 100%;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #resultado {
+            margin-top: 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .info {
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Validador de Cédula y RUC</h1>
+        <input type="text" id="numero" placeholder="Ingrese cédula o RUC">
+        <button onclick="validar()">Validar</button>
+        <div id="resultado"></div>
+        <div class="info">
+            Nota: Este validador incluye comprobaciones para diferentes tipos de RUC y cédulas, incluyendo consulta al sistema del SRI para casos específicos.
+        </div>
+    </div>
+
+    <script>
+        async function validar() {
+            const numero = document.getElementById('numero').value;
+            const resultado = document.getElementById('resultado');
+            
+            if (numero.length === 10) {
+                const validacionCedula = validarCedula(numero);
+                if (validacionCedula.esValido) {
+                    resultado.textContent = "Cédula válida";
+                    resultado.style.color = "green";
+                } else {
+                    resultado.textContent = `Cédula inválida: ${validacionCedula.razon}`;
+                    resultado.style.color = "red";
+                }
+            } else if (numero.length === 13) {
+                const validacionRUC = await validarRUC(numero);
+                if (validacionRUC.esValido) {
+                    resultado.textContent = `RUC válido (${validacionRUC.tipo})`;
+                    resultado.style.color = "green";
+                } else {
+                    resultado.textContent = `RUC inválido: ${validacionRUC.razon}`;
+                    resultado.style.color = "red";
+                }
+            } else {
+                resultado.textContent = "Número inválido: debe tener 10 (cédula) o 13 (RUC) dígitos";
+                resultado.style.color = "red";
+            }
+        }
+
+        function validarCedula(cedula) {
+            if (!/^\d{10}$/.test(cedula)) {
+                return { esValido: false, razon: "Debe contener solo 10 dígitos" };
+            }
+
+            const provincia = parseInt(cedula.substring(0, 2));
+            if (provincia < 1 || provincia > 24) {
+                return { esValido: false, razon: "Código de provincia inválido" };
+            }
+
+            const tercerDigito = parseInt(cedula.charAt(2));
+            if (tercerDigito > 5) {
+                return { esValido: false, razon: "Tercer dígito inválido para cédula" };
+            }
+
+            const coeficientes = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+            let total = 0;
+
+            for (let i = 0; i < 9; i++) {
+                let valor = parseInt(cedula.charAt(i)) * coeficientes[i];
+                total += valor > 9 ? valor - 9 : valor;
+            }
+
+            const digitoVerificador = total % 10 ? 10 - (total % 10) : 0;
+            if (digitoVerificador !== parseInt(cedula.charAt(9))) {
+                return { esValido: false, razon: "Dígito verificador incorrecto" };
+            }
+
+            return { esValido: true, razon: "" };
+        }
+
+        async function validarRUC(ruc) {
+            if (!/^\d{13}$/.test(ruc)) {
+                return { esValido: false, tipo: '', razon: "Debe contener solo 13 dígitos" };
+            }
+
+            const provincia = parseInt(ruc.substr(0, 2));
+            if (provincia < 1 || provincia > 24) {
+                return { esValido: false, tipo: '', razon: "Código de provincia inválido" };
+            }
+
+            const tercerDigito = parseInt(ruc.charAt(2));
+            const codigoEstablecimiento = ruc.substr(10, 3);
+
+            if (codigoEstablecimiento !== '001') {
+                return { esValido: false, tipo: '', razon: "Código de establecimiento inválido" };
+            }
+
+            const numeroSecuencial = parseInt(ruc.substr(3, 7));
+
+            if (tercerDigito < 6) {
+                // Persona natural
+                const validacionCedula = validarCedula(ruc.substr(0, 10));
+                return {
+                    esValido: validacionCedula.esValido,
+                    tipo: 'Persona natural',
+                    razon: validacionCedula.esValido ? '' : validacionCedula.razon
+                };
+            } else if (tercerDigito === 6) {
+                // Institución pública
+                if (!validarDigitoVerificadorModulo11(ruc.substring(0, 9), [3, 2, 7, 6, 5, 4, 3, 2])) {
+                    return { esValido: false, tipo: "Institución pública", razon: "Dígito verificador incorrecto" };
+                }
+                return await consultarSRI(ruc, "Institución pública");
+            } else if (tercerDigito === 9) {
+                // Sociedad privada o extranjero no residente
+                const validacionSecuencial = validarNumeroSecuencial(numeroSecuencial);
+                if (!validacionSecuencial.esValido) {
+                    return validacionSecuencial;
+                }
+                return await consultarSRI(ruc, "Sociedad privada o extranjero no residente");
+            } else {
+                return { esValido: false, tipo: '', razon: "Tercer dígito inválido para RUC" };
+            }
+        }
+
+        function validarNumeroSecuencial(numeroSecuencial) {
+            if (numeroSecuencial < 1 || numeroSecuencial > 5000000) {
+                return { esValido: false, tipo: "Sociedad privada o extranjero no residente", razon: "Número secuencial fuera de rango válido" };
+            }
+            return { esValido: true, tipo: "Sociedad privada o extranjero no residente", razon: '' };
+        }
+
+        function validarDigitoVerificadorModulo11(numero, coeficientes) {
+            let total = 0;
+
+            for (let i = 0; i < coeficientes.length; i++) {
+                total += parseInt(numero.charAt(i)) * coeficientes[i];
+            }
+
+            const residuo = total % 11;
+            const digitoVerificador = residuo === 0 ? 0 : 11 - residuo;
+            return digitoVerificador === parseInt(numero.charAt(coeficientes.length));
+        }
+
+        async function consultarSRI(ruc, tipo) {
+            try {
+                const response = await fetch(`/api/consultar-sri?ruc=${ruc}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Error en la respuesta del servidor');
+                }
+
+                const data = await response.json();
+                
+                if (data.existe) {
+                    return { esValido: true, tipo: tipo, razon: "Verificado en el sistema del SRI" };
+                } else {
+                    return { esValido: false, tipo: tipo, razon: "No encontrado en el sistema del SRI" };
+                }
+            } catch (error) {
+                console.error('Error al consultar el SRI:', error);
+                return { esValido: false, tipo: tipo, razon: "Error al consultar el sistema del SRI" };
+            }
+        }
+    </script>
+</body>
+</html>
